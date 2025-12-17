@@ -40,7 +40,8 @@
     .play-container { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; transition: background 0.15s; }
     .play-container.flash { background: #78350f; }
     .countdown-section { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 1rem; }
-    .countdown { font-family: monospace; font-weight: 900; color: #22d3ee; line-height: 1; font-size: min(40vw, 160px); }
+    .countdown { font-family: monospace; font-weight: 900; color: #22d3ee; line-height: 1; font-size: min(40vw, 160px); text-align: center; }
+    #active-display { text-align: center; }
     .current-msg { font-size: clamp(2rem, 8vw, 3.75rem); text-align: center; padding: 0 1rem; margin-top: 1.5rem; font-weight: bold; }
     .queue { background: #111; margin: 0 1rem 1rem; border-radius: 1rem; padding: 1rem; }
     .queue-item {
@@ -217,7 +218,13 @@
       setTimeout(() => playMode.classList.remove('flash'), 150);
     }
 
+    function initAudio() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
     function start() {
+      initAudio();
       events = parseScript(scriptEl.value);
       if (!events.length) return;
       currentIndex = 0; startTime = performance.now(); pausedAt = null;
