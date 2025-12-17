@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Cue Timer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #000;
+      color: #fff;
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+    .container { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; padding: 1rem; }
+    .title { font-size: 1.875rem; font-weight: bold; text-align: center; margin-bottom: 1rem; color: #22d3ee; }
+    .edit-section { flex: 1; display: flex; flex-direction: column; gap: 1rem; }
+    .label { font-size: 1.125rem; color: #9ca3af; margin-bottom: 0.5rem; }
+    textarea {
+      width: 100%; height: 12rem; background: #111; border: 2px solid #374151; border-radius: 0.75rem;
+      padding: 1rem; color: #fff; font-family: monospace; font-size: 1.125rem; resize: none;
+    }
+    textarea:focus { border-color: #22d3ee; outline: none; }
+    .preview { background: #111; border-radius: 0.75rem; padding: 1rem; }
+    .preview-title { font-size: 1.125rem; color: #9ca3af; margin-bottom: 0.75rem; }
+    .preview-list { max-height: 10rem; overflow-y: auto; }
+    .preview-item { display: flex; justify-content: space-between; font-size: 1.125rem; padding: 0.25rem 0; }
+    .preview-time { color: #67e8f9; font-family: monospace; }
+    .preview-msg { color: #d1d5db; margin-left: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .btn {
+      width: 100%; padding: 1.25rem; border-radius: 1rem; font-size: 1.5rem; font-weight: bold;
+      border: none; cursor: pointer; transition: background 0.2s;
+    }
+    .btn-start { background: #0891b2; color: #fff; }
+    .btn-start:hover { background: #06b6d4; }
+    .btn-start:disabled { background: #1f2937; color: #6b7280; cursor: not-allowed; }
+    .play-container { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; transition: background 0.15s; }
+    .play-container.flash { background: #78350f; }
+    .countdown-section { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 1rem; }
+    .countdown { font-family: monospace; font-weight: 900; color: #22d3ee; line-height: 1; font-size: min(40vw, 160px); }
+    .current-msg { font-size: clamp(2rem, 8vw, 3.75rem); text-align: center; padding: 0 1rem; margin-top: 1.5rem; font-weight: bold; }
+    .queue { background: #111; margin: 0 1rem 1rem; border-radius: 1rem; padding: 1rem; }
+    .queue-item {
+      display: flex; align-items: center; gap: 1rem; font-size: 1.875rem; padding: 0.5rem;
+      margin: -0.25rem -0.5rem; border-radius: 0.5rem; cursor: pointer;
+    }
+    .queue-item:active { background: #374151; }
+    .queue-item.next { color: #e5e7eb; }
+    .queue-item.later { color: #6b7280; }
+    .queue-time { color: #22d3ee; font-family: monospace; width: 3.5rem; }
+    .queue-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+    .controls { display: flex; gap: 1rem; padding: 1rem; }
+    .btn-pause { flex: 1; padding: 1.25rem; background: #1f2937; color: #fff; }
+    .btn-pause:hover { background: #374151; }
+    .btn-stop { flex: 1; padding: 1.25rem; background: #991b1b; color: #fff; }
+    .btn-stop:hover { background: #b91c1c; }
+    .finished { text-align: center; }
+    .finished-icon { font-size: 8rem; color: #4ade80; font-weight: bold; margin-bottom: 1.5rem; }
+    .finished-text { font-size: 3rem; color: #4ade80; font-weight: bold; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="edit-mode" class="container">
+    <h1 class="title">Cue Timer</h1>
+    <div class="edit-section">
+      <div style="flex:1">
+        <div class="label">Script (format: 0'10'' : message)</div>
+        <textarea id="script" placeholder="0'10'' : premier événement"></textarea>
+      </div>
+      <div id="preview" class="preview hidden">
+        <div class="preview-title">Aperçu (<span id="preview-count">0</span> événements)</div>
+        <div id="preview-list" class="preview-list"></div>
+      </div>
+      <button id="btn-start" class="btn btn-start" disabled>START</button>
+    </div>
+  </div>
+
+  <div id="play-mode" class="play-container hidden">
+    <div class="countdown-section">
+      <div id="finished" class="finished hidden">
+        <div class="finished-icon">OK</div>
+        <div class="finished-text">Terminé !</div>
+      </div>
+      <div id="active-display">
+        <div id="countdown" class="countdown">00</div>
+        <div id="current-msg" class="current-msg"></div>
+      </div>
+    </div>
+    <div id="queue" class="queue hidden"></div>
+    <div class="controls">
+      <button id="btn-pause" class="btn btn-pause">PAUSE</button>
+      <button id="btn-stop" class="btn btn-stop">STOP</button>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'cue-timer-script';
+    let events = [], currentIndex = 0, startTime = null, pausedAt = null, isRunning = false;
+    let wakeLock = null, audioCtx = null, animFrame = null;
+    let lastBeep = { t2: false, t1: false };
+
+    const $ = id => document.getElementById(id);
+    const scriptEl = $('script'), previewEl = $('preview'), previewList = $('preview-list');
+    const previewCount = $('preview-count'), btnStart = $('btn-start');
+    const editMode = $('edit-mode'), playMode = $('play-mode');
+    const countdownEl = $('countdown'), currentMsgEl = $('current-msg'), queueEl = $('queue');
+    const finishedEl = $('finished'), activeDisplay = $('active-display');
+    const btnPause = $('btn-pause'), btnStop = $('btn-stop');
+
+    function parseTimestamp(ts) {
+      const m = ts.match(/(\d+)'(\d+)''/);
+      return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : null;
+    }
+
+    function parseScript(text) {
+      const lines = text.trim().split('\n').filter(l => l.trim());
+      const evts = [];
+      for (const line of lines) {
+        const m = line.match(/^(\d+'\d+'')\s*:\s*(.+)$/);
+        if (m) {
+          const ts = parseTimestamp(m[1]);
+          if (ts !== null) evts.push({ timestamp: ts, message: m[2].trim() });
+        }
+      }
+      evts.sort((a, b) => a.timestamp - b.timestamp);
+      evts.forEach((e, i) => e.duration = i === 0 ? e.timestamp : e.timestamp - evts[i-1].timestamp);
+      return evts;
+    }
+
+    function updatePreview() {
+      const parsed = parseScript(scriptEl.value);
+      if (parsed.length > 0) {
+        previewEl.classList.remove('hidden');
+        previewCount.textContent = parsed.length;
+        previewList.innerHTML = parsed.map(e => 
+          `<div class="preview-item"><span class="preview-time">${e.duration}s</span><span class="preview-msg">${e.message}</span></div>`
+        ).join('');
+        btnStart.disabled = false;
+      } else {
+        previewEl.classList.add('hidden');
+        btnStart.disabled = true;
+      }
+      localStorage.setItem(STORAGE_KEY, scriptEl.value);
+    }
+
+    function beep(freq = 800, dur = 0.1) {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.frequency.value = freq; osc.type = 'sine';
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+        osc.start(); osc.stop(audioCtx.currentTime + dur);
+      } catch(e) {}
+    }
+
+    async function requestWakeLock() {
+      try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch(e) {}
+    }
+    function releaseWakeLock() { if (wakeLock) { wakeLock.release(); wakeLock = null; } }
+
+    function renderQueue() {
+      const upcoming = events.slice(currentIndex + 1, currentIndex + 6);
+      if (upcoming.length === 0) { queueEl.classList.add('hidden'); return; }
+      queueEl.classList.remove('hidden');
+      queueEl.innerHTML = upcoming.map((e, i) => 
+        `<div class="queue-item ${i === 0 ? 'next' : 'later'}" data-index="${currentIndex + 1 + i}">
+          <span class="queue-time">${e.duration}s</span><span class="queue-msg">${e.message}</span>
+        </div>`
+      ).join('');
+    }
+
+    function jumpTo(idx) {
+      if (idx >= events.length) return;
+      const prev = idx > 0 ? events[idx - 1].timestamp : 0;
+      startTime = performance.now() - prev * 1000;
+      pausedAt = null; lastBeep = { t2: false, t1: false };
+      currentIndex = idx;
+      if (!isRunning) { isRunning = true; btnPause.textContent = 'PAUSE'; tick(); }
+    }
+
+    function tick() {
+      if (!isRunning) return;
+      const elapsed = (performance.now() - startTime) / 1000;
+      let newIdx = currentIndex;
+      while (newIdx < events.length && elapsed >= events[newIdx].timestamp) newIdx++;
+      
+      if (newIdx >= events.length) {
+        isRunning = false; releaseWakeLock();
+        countdownEl.textContent = '00';
+        activeDisplay.classList.add('hidden'); finishedEl.classList.remove('hidden'); queueEl.classList.add('hidden');
+        setTimeout(() => { playMode.classList.add('hidden'); editMode.classList.remove('hidden'); }, 2000);
+        return;
+      }
+      
+      if (newIdx !== currentIndex) { currentIndex = newIdx; lastBeep = { t2: false, t1: false }; }
+      
+      const remaining = events[currentIndex].timestamp - elapsed;
+      countdownEl.textContent = Math.max(0, Math.ceil(remaining)).toString().padStart(2, '0');
+      currentMsgEl.textContent = events[currentIndex].message;
+      renderQueue();
+      
+      const rounded = Math.ceil(remaining);
+      if (rounded === 2 && !lastBeep.t2) { beep(600); flash(); lastBeep.t2 = true; }
+      if (rounded === 1 && !lastBeep.t1) { beep(800); flash(); lastBeep.t1 = true; }
+      
+      animFrame = requestAnimationFrame(tick);
+    }
+
+    function flash() {
+      playMode.classList.add('flash');
+      setTimeout(() => playMode.classList.remove('flash'), 150);
+    }
+
+    function start() {
+      events = parseScript(scriptEl.value);
+      if (!events.length) return;
+      currentIndex = 0; startTime = performance.now(); pausedAt = null;
+      lastBeep = { t2: false, t1: false }; isRunning = true;
+      editMode.classList.add('hidden'); playMode.classList.remove('hidden');
+      finishedEl.classList.add('hidden'); activeDisplay.classList.remove('hidden');
+      btnPause.textContent = 'PAUSE';
+      requestWakeLock(); tick();
+    }
+
+    function stop() {
+      isRunning = false; cancelAnimationFrame(animFrame); releaseWakeLock();
+      playMode.classList.add('hidden'); editMode.classList.remove('hidden');
+    }
+
+    function togglePause() {
+      if (isRunning) {
+        isRunning = false; pausedAt = performance.now();
+        cancelAnimationFrame(animFrame); btnPause.textContent = 'GO';
+      } else {
+        if (pausedAt) startTime += performance.now() - pausedAt;
+        pausedAt = null; isRunning = true; btnPause.textContent = 'PAUSE'; tick();
+      }
+    }
+
+    scriptEl.value = localStorage.getItem(STORAGE_KEY) || `0'10'' : notification reçue
+0'12'' : switch écran
+0'15'' : login click
+0'20'' : saisie identifiant
+0'25'' : validation`;
+    updatePreview();
+
+    scriptEl.addEventListener('input', updatePreview);
+    btnStart.addEventListener('click', start);
+    btnStop.addEventListener('click', stop);
+    btnPause.addEventListener('click', togglePause);
+    queueEl.addEventListener('click', e => {
+      const item = e.target.closest('.queue-item');
+      if (item) jumpTo(parseInt(item.dataset.index));
+    });
+  </script>
+</body>
+</html>
